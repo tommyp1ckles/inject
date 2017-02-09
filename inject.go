@@ -4,6 +4,7 @@ package inject
 import (
 	"fmt"
 	"reflect"
+	"sync"
 )
 
 // Injector represents an interface for mapping and injecting dependencies into structs
@@ -55,6 +56,7 @@ type TypeMapper interface {
 type injector struct {
 	values map[reflect.Type]reflect.Value
 	parent Injector
+	lock   sync.Mutex
 }
 
 // InterfaceOf dereferences a pointer to an Interface type.
@@ -77,6 +79,7 @@ func InterfaceOf(value interface{}) reflect.Type {
 func New() Injector {
 	return &injector{
 		values: make(map[reflect.Type]reflect.Value),
+		lock:   sync.Mutex{},
 	}
 }
 
@@ -139,24 +142,32 @@ func (inj *injector) Apply(val interface{}) error {
 // Maps the concrete value of val to its dynamic type using reflect.TypeOf,
 // It returns the TypeMapper registered in.
 func (i *injector) Map(val interface{}) TypeMapper {
+	i.lock.Lock()
 	i.values[reflect.TypeOf(val)] = reflect.ValueOf(val)
+	i.lock.Unlock()
 	return i
 }
 
 func (i *injector) MapTo(val interface{}, ifacePtr interface{}) TypeMapper {
+	i.lock.Lock()
 	i.values[InterfaceOf(ifacePtr)] = reflect.ValueOf(val)
+	i.lock.Unlock()
 	return i
 }
 
 // Maps the given reflect.Type to the given reflect.Value and returns
 // the Typemapper the mapping has been registered in.
 func (i *injector) Set(typ reflect.Type, val reflect.Value) TypeMapper {
+	i.lock.Lock()
 	i.values[typ] = val
+	i.lock.Unlock()
 	return i
 }
 
 func (i *injector) Get(t reflect.Type) reflect.Value {
+	i.lock.Lock()
 	val := i.values[t]
+	i.lock.Unlock()
 
 	if val.IsValid() {
 		return val
@@ -165,12 +176,14 @@ func (i *injector) Get(t reflect.Type) reflect.Value {
 	// no concrete types found, try to find implementors
 	// if t is an interface
 	if t.Kind() == reflect.Interface {
+		i.lock.Lock()
 		for k, v := range i.values {
 			if k.Implements(t) {
 				val = v
 				break
 			}
 		}
+		i.lock.Unlock()
 	}
 
 	// Still no type found, try to look it up on the parent
